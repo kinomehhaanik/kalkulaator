@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="et">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Kalkulaator</title>
+<style>
+  :root {
+    --bg: #000;
+    --sub: #8e8e93;
+    --num: #333336;
+    --func: #a5a5a5;
+    --op: #ff9f0a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    min-height: 100dvh;
+    padding: calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+    touch-action: manipulation;
+  }
+  .calc { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px; }
+  .display {
+    min-height: 160px;
+    padding: 0 10px;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    overflow: hidden;
+  }
+  .history { color: var(--sub); font-size: 22px; min-height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .current { font-size: 76px; font-weight: 300; line-height: 1.1; white-space: nowrap; }
+  .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  button {
+    aspect-ratio: 1;
+    border: 0;
+    border-radius: 999px;
+    background: var(--num);
+    color: #fff;
+    font: inherit;
+    font-size: 32px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: filter .08s;
+  }
+  button:active { filter: brightness(1.5); }
+  button.f { background: var(--func); color: #000; font-size: 28px; }
+  button.o { background: var(--op); font-size: 38px; }
+  button.o.active { background: #fff; color: var(--op); }
+  button.zero { grid-column: span 2; aspect-ratio: auto; text-align: left; padding-left: 13%; }
+  .badge {
+    position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    background: #1f7a3a; color: #fff; font-size: 13px; padding: 4px 10px; border-radius: 999px;
+  }
+</style>
+</head>
+<body>
+<main class="calc">
+  <div class="display" aria-live="polite">
+    <div class="history" id="history"></div>
+    <div class="current" id="current">0</div>
+  </div>
+  <div class="keys">
+    <button class="f" data-k="C">C</button>
+    <button class="f" data-k="back" aria-label="Kustuta">⌫</button>
+    <button class="f" data-k="sign">±</button>
+    <button class="o" data-k="÷">÷</button>
+
+    <button data-k="7">7</button>
+    <button data-k="8">8</button>
+    <button data-k="9">9</button>
+    <button class="o" data-k="×">×</button>
+
+    <button data-k="4">4</button>
+    <button data-k="5">5</button>
+    <button data-k="6">6</button>
+    <button class="o" data-k="−">−</button>
+
+    <button data-k="1">1</button>
+    <button data-k="2">2</button>
+    <button data-k="3">3</button>
+    <button class="o" data-k="+">+</button>
+
+    <button class="zero" data-k="0">0</button>
+    <button data-k=",">,</button>
+    <button class="o" data-k="=">=</button>
+  </div>
+</main>
+
+<script>
+  // Lisa aadressi lõppu ?korras, et saada vigadeta versioon (õpetajale võrdluseks).
+  const BUGGY = !new URLSearchParams(location.search).has('korras');
+  if (!BUGGY) {
+    const b = document.createElement('div');
+    b.className = 'badge';
+    b.textContent = 'Korras versioon';
+    document.body.appendChild(b);
+  }
+
+  const MAX_DIGITS = 15;
+  let cur = '0';     // ekraanil olev arv (tekstina, komaga)
+  let acc = null;    // eelmine arv
+  let op = null;     // ootel tehe
+  let fresh = true;  // järgmine number alustab uut arvu
+  let hist = '';
+
+  const elCur = document.getElementById('current');
+  const elHist = document.getElementById('history');
+  const opButtons = document.querySelectorAll('button.o');
+
+  const toNum = s => parseFloat(s.replace(',', '.'));
+
+  function fmt(n) {
+    if (!isFinite(n)) return 'Viga';
+    let s = String(parseFloat(n.toPrecision(12)));
+    if (s.includes('e')) s = n.toExponential(6);
+    return s.replace('.', ',');
+  }
+
+  function calc(a, b, o) {
+    switch (o) {
+      case '+': return a + b;
+      case '−': return a - b;
+      case '×': return a * b;
+      case '÷': return b === 0 ? NaN : a / b;
+    }
+    return b;
+  }
+
+  function digit(d) {
+    if (BUGGY) {               // VIGA 1: 3 ja 8 on vahetuses
+      if (d === '3') d = '8';
+      else if (d === '8') d = '3';
+    }
+    if (fresh || cur === 'Viga') { cur = d; fresh = false; return; }
+    if (cur === '0') { cur = d; return; }
+    if (cur === '-0') { cur = '-' + d; return; }
+    if (cur.replace(/[-,]/g, '').length >= MAX_DIGITS) return;
+    cur += d;
+  }
+
+  function comma() {
+    if (fresh || cur === 'Viga') { cur = '0,'; fresh = false; return; }
+    if (cur.includes(',')) return;
+    if (BUGGY) {               // VIGA 2: koma läheb arvu ette kujul "0,"
+      const neg = cur.startsWith('-');
+      const digits = cur.replace('-', '');
+      cur = (neg ? '-' : '') + '0,' + (digits === '0' ? '' : digits);
+    } else {
+      cur += ',';
+    }
+  }
+
+  function operator(o) {
+    if (cur === 'Viga') return;
+    if (op && !fresh) {
+      acc = calc(acc, toNum(cur), op);
+      cur = fmt(acc);
+      if (cur === 'Viga') { acc = null; op = null; hist = ''; fresh = true; return; }
+    } else if (!op) {
+      acc = toNum(cur);
+    }
+    op = o;
+    fresh = true;
+    hist = fmt(acc) + ' ' + o;
+  }
+
+  function equals() {
+    if (!op || cur === 'Viga') return;
+    const b = toNum(cur);
+    let r = calc(acc, b, op);
+    hist = fmt(acc) + ' ' + op + ' ' + fmt(b) + ' =';
+    if (BUGGY && isFinite(r)) { // VIGA 3: tulemusele juhuslikult -1, 0 või +1
+      r += [-1, 0, 1][Math.floor(Math.random() * 3)];
+    }
+    cur = fmt(r);
+    acc = null;
+    op = null;
+    fresh = true;
+  }
+
+  function back() {
+    if (fresh || cur === 'Viga') return;
+    const body = cur.replace('-', '');
+    if (body.length <= 1) { cur = '0'; return; }
+    cur = cur.slice(0, -1);
+    if (cur === '-') cur = '0';
+  }
+
+  function sign() {
+    if (cur === 'Viga' || cur === '0') return;
+    cur = cur.startsWith('-') ? cur.slice(1) : '-' + cur;
+  }
+
+  function clearAll() {
+    cur = '0'; acc = null; op = null; fresh = true; hist = '';
+  }
+
+  function render() {
+    elCur.textContent = cur;
+    elHist.textContent = hist;
+    const len = cur.length;
+    elCur.style.fontSize = (len <= 7 ? 76 : Math.max(30, Math.floor(76 * 7 / len))) + 'px';
+    opButtons.forEach(b => b.classList.toggle('active', fresh && op === b.dataset.k));
+  }
+
+  function press(k) {
+    if (/^[0-9]$/.test(k)) digit(k);
+    else if (k === ',') comma();
+    else if (k === '=') equals();
+    else if ('+−×÷'.includes(k)) operator(k);
+    else if (k === 'C') clearAll();
+    else if (k === 'back') back();
+    else if (k === 'sign') sign();
+    render();
+  }
+
+  document.querySelector('.keys').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (btn) press(btn.dataset.k);
+  });
+
+  // Arvuti klaviatuuri tugi (samad vead kehtivad)
+  const keyMap = { '.': ',', ',': ',', '+': '+', '-': '−', '*': '×', '/': '÷',
+                   'Enter': '=', '=': '=', 'Backspace': 'back', 'Escape': 'C', 'Delete': 'C' };
+  document.addEventListener('keydown', e => {
+    const k = /^[0-9]$/.test(e.key) ? e.key : keyMap[e.key];
+    if (k) { e.preventDefault(); press(k); }
+  });
+
+  render();
+</script>
+</body>
+</html>
